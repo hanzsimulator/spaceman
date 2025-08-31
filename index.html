@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Crash Game Multi User + Admin + History</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
+<style>
+    body {
+        background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #1a1a2e);
+        background-size: 400% 400%;
+        animation: gradientBG 15s ease infinite;
+        color: #fff;
+        font-family: 'Montserrat', sans-serif;
+        margin: 0;
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+    }
+    @keyframes gradientBG {
+        0% {background-position: 0% 50%;}
+        50% {background-position: 100% 50%;}
+        100% {background-position: 0% 50%;}
+    }
+    .panel {
+        width: 500px;
+        padding: 15px 20px;
+        margin: 15px 0;
+        border-radius: 15px;
+        backdrop-filter: blur(12px);
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    }
+    button {
+        cursor: pointer;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 15px;
+        background: linear-gradient(135deg, #4facfe, #00f2fe);
+        color: white;
+        font-weight: bold;
+        margin: 5px;
+        transition: 0.3s;
+    }
+    button:hover {
+        box-shadow: 0 0 15px #00f2fe, 0 0 30px #00f2fe;
+        transform: scale(1.05);
+    }
+    input {
+        border-radius: 8px;
+        padding: 8px;
+        margin: 5px 0;
+        width: 90%;
+        text-align: center;
+    }
+    #leaderboard ul { list-style: none; padding: 0; }
+    #leaderboard li { margin: 4px 0; }
+    table { width:100%; color:white; border-collapse: collapse; }
+    th, td { border:1px solid rgba(255,255,255,0.2); padding:6px; text-align:center; font-size:14px; }
+    #historyList { max-height:200px; overflow-y:auto; }
+</style>
+</head>
+<body>
+
+    <!-- Login/Register -->
+    <div id="authPanel" class="panel">
+        <h3>🔑 Login / Register</h3>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="register()">Register</button>
+        <button onclick="login()">Login</button>
+        <p id="authMsg"></p>
+    </div>
+
+    <!-- Game Panel -->
+    <div id="gamePanel" style="display:none;">
+        <div id="gameContainer" class="panel">
+            <canvas id="game" width="500" height="400"></canvas>
+            <p id="currentMultiplier">0.0x</p>
+        </div>
+
+        <div id="infoContainer" class="panel">
+            <p id="balance">Balance: 0$</p>
+            <p id="crashedAt">Multiplier at crash: -</p>
+        </div>
+
+        <div id="buttonContainer" class="panel">
+            <button id="submitBet">🚀 Start Game</button>
+            <button id="takeProfits">💰 Take Profits</button>
+            <input type="number" id="betAmount" value="10">
+        </div>
+
+        <div id="actions" class="panel">
+            <button onclick="deposit()">💳 Deposit</button>
+            <button onclick="withdraw()">🏧 Withdraw</button>
+            <button onclick="logout()">🚪 Logout</button>
+        </div>
+
+        <div id="lastCrashesContainer" class="panel">
+            <p>Last Crashes:</p>
+            <div id="lastCrashes"></div>
+        </div>
+
+        <div id="leaderboard" class="panel">
+            <p>🏆 Leaderboard:</p>
+            <ul id="leaderList"></ul>
+        </div>
+
+        <div id="historyPanel" class="panel">
+            <p>📜 Your History:</p>
+            <ul id="historyList"></ul>
+        </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div id="adminPanel" class="panel" style="display:none;">
+        <h3>⚙️ Admin Panel</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th><th>Balance</th><th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="adminUserList"></tbody>
+        </table>
+        <h4>All Histories</h4>
+        <ul id="adminHistoryList"></ul>
+    </div>
+
+<script>
+    // === User Management ===
+    let users = JSON.parse(localStorage.getItem("users")) || [];
+    let currentUser = null;
+
+    // jika belum ada admin, buat default
+    if (!users.find(u=>u.username==="admin")) {
+        users.push({username:"admin",password:"admin",balance:99999,role:"admin",history:[]});
+        localStorage.setItem("users", JSON.stringify(users));
+    }
+
+    function register() {
+        let u = document.getElementById("username").value.trim();
+        let p = document.getElementById("password").value.trim();
+        if (!u || !p) return showMsg("Username/password required");
+        if (users.find(x => x.username === u)) return showMsg("User already exists");
+        users.push({username:u,password:p,balance:1000,role:"player",history:[]});
+        localStorage.setItem("users", JSON.stringify(users));
+        showMsg("Registered! Please login.");
+    }
+
+    function login() {
+        let u = document.getElementById("username").value.trim();
+        let p = document.getElementById("password").value.trim();
+        let user = users.find(x => x.username === u && x.password === p);
+        if (!user) return showMsg("Invalid credentials");
+        currentUser = user;
+        document.getElementById("authPanel").style.display="none";
+        document.getElementById("gamePanel").style.display="block";
+        updateBalance();
+        updateLeaderboard();
+        updateHistory();
+        if (currentUser.role==="admin") {
+            document.getElementById("adminPanel").style.display="block";
+            updateAdminPanel();
+        } else {
+            document.getElementById("adminPanel").style.display="none";
+        }
+    }
+
+    function logout() {
+        currentUser = null;
+        document.getElementById("authPanel").style.display="block";
+        document.getElementById("gamePanel").style.display="none";
+        document.getElementById("adminPanel").style.display="none";
+    }
+
+    function showMsg(msg) {
+        document.getElementById("authMsg").innerText=msg;
+    }
+
+    // === Game Variables ===
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#00f2fe';
+    ctx.lineWidth = 2;
+
+    let curvePoints = [];
+    let gameLoop;
+    let crashed;
+    let betAmount;
+    let profitsTaken;
+    let rocketPosition;
+
+    const balanceDisplay = document.getElementById('balance');
+    const betAmountInput = document.getElementById('betAmount');
+
+    function updateBalance() {
+        if (!currentUser) return;
+        balanceDisplay.innerText = "Balance: " + currentUser.balance + "$";
+        updateLeaderboard();
+        localStorage.setItem("users", JSON.stringify(users));
+        if (currentUser.role==="admin") updateAdminPanel();
+    }
+
+    // === Game Functions ===
+    function updateCurve() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        for (let i = 0; i < curvePoints.length; i++) {
+            const { x, y } = curvePoints[i];
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        if (!crashed) {
+            const lastPoint = curvePoints[curvePoints.length - 1];
+            if (curvePoints.length >= 2) {
+                const secondLastPoint = curvePoints[curvePoints.length - 2];
+                const deltaX = lastPoint.x - secondLastPoint.x;
+                const deltaY = lastPoint.y - secondLastPoint.y;
+                const angle = Math.atan2(deltaY, deltaX) + Math.PI / 4;
+                ctx.save();
+                ctx.translate(lastPoint.x, lastPoint.y);
+                ctx.rotate(angle);
+                ctx.font = '30px Arial';
+                ctx.fillText('🚀', 0, -10);
+                rocketPosition = { x: lastPoint.x, y: lastPoint.y };
+                ctx.restore();
+            }
+        } else {
+            ctx.save();
+            ctx.translate(rocketPosition.x, rocketPosition.y - 10);
+            ctx.font = '30px Arial';
+            ctx.fillText('💥', 0, 0);
+            ctx.restore();
+        }
+    }
+
+    function updateCurvePoints() {
+        const lastPoint = curvePoints[curvePoints.length - 1];
+        const newX = lastPoint.x + 1;
+        const newY = canvas.height - (Math.pow(newX, 1.75) / 100);
+        document.getElementById('currentMultiplier').innerText = (curvePoints.length / 100).toFixed(2) + 'x';
+        curvePoints.push({ x: newX, y: newY });
+    }
+
+    function startGame() {
+        curvePoints = [{ x: 0, y: canvas.height }];
+        updateCurve();
+    }
+
+    function getRandomCrashTime(min, max) {
+        return (Math.random() * (max - min) + min) * 1000;
+    }
+
+    function crashCurve() {
+        clearInterval(gameLoop);
+        const crashValue = (curvePoints.length / 100).toFixed(2);
+        document.getElementById('crashedAt').innerText = `Multiplier at crash: ${crashValue}x`;
+        crashed = true;
+        const crash = document.createElement('p');
+        crash.innerText = crashValue + 'x';
+        crash.style.color = profitsTaken ? '#00ff88' : '#ff4d4d';
+        document.getElementById('lastCrashes').appendChild(crash);
+        updateCurve();
+        if(currentUser) {
+            currentUser.history.push("Game crashed at "+crashValue+"x");
+            updateHistory();
+            saveUsers();
+        }
+    }
+
+    document.getElementById('submitBet').addEventListener('click', function () {
+        if (!currentUser) return;
+        let bet = parseInt(betAmountInput.value);
+        if (currentUser.balance >= bet) {
+            currentUser.balance -= bet;
+            updateBalance();
+            crashed = false;
+            profitsTaken = false;
+            startGame();
+            gameLoop = setInterval(() => {
+                updateCurvePoints();
+                updateCurve();
+            }, 16);
+            betAmount = bet;
+            if(currentUser) {
+                currentUser.history.push("Bet "+bet+"$ started");
+                updateHistory();
+                saveUsers();
+            }
+            setTimeout(crashCurve, getRandomCrashTime(1, 5.5));
+        }
+    });
+
+    document.getElementById('takeProfits').addEventListener('click', function () {
+        if (!crashed && !profitsTaken && currentUser) {
+            profitsTaken = true;
+            let profit = betAmount * (curvePoints.length / 100) - betAmount;
+            currentUser.balance = parseFloat(currentUser.balance) + profit + parseFloat(betAmount);
+            currentUser.balance = parseFloat(currentUser.balance.toFixed(2));
+            updateBalance();
+            currentUser.history.push("Took profit: "+profit.toFixed(2)+"$");
+            updateHistory();
+            saveUsers();
+        }
+    });
+
+    // === Deposit & Withdraw ===
+    function deposit() {
+        let amount = prompt("Deposit amount:");
+        if (amount && currentUser) {
+            amount=parseInt(amount);
+            currentUser.balance += amount;
+            updateBalance();
+            currentUser.history.push("Deposit: +"+amount+"$");
+            updateHistory();
+            saveUsers();
+        }
+    }
+
+    function withdraw() {
+        let amount = prompt("Withdraw amount:");
+        if (amount && currentUser && currentUser.balance >= amount) {
+            amount=parseInt(amount);
+            currentUser.balance -= amount;
+            updateBalance();
+            currentUser.history.push("Withdraw: -"+amount+"$");
+            updateHistory();
+            saveUsers();
+        }
+    }
+
+    function saveUsers() {
+        localStorage.setItem("users", JSON.stringify(users));
+    }
+
+    // === Leaderboard ===
+    function updateLeaderboard() {
+        let list = document.getElementById("leaderList");
+        list.innerHTML = "";
+        let sorted = [...users].sort((a,b) => b.balance - a.balance);
+        sorted.forEach(u=>{
+            let li=document.createElement("li");
+            li.innerText = u.username + " - " + u.balance + "$";
+            list.appendChild(li);
+        });
+    }
+
+    // === History ===
+    function updateHistory() {
+        if (!currentUser) return;
+        let list=document.getElementById("historyList");
+        list.innerHTML="";
+        currentUser.history.slice().reverse().forEach(h=>{
+            let li=document.createElement("li");
+            li.innerText=h;
+            list.appendChild(li);
+        });
+        if(currentUser.role==="admin") updateAdminPanel();
+    }
+
+    // === Admin Panel ===
+    function updateAdminPanel() {
+        let tbody=document.getElementById("adminUserList");
+        tbody.innerHTML="";
+        users.forEach(u=>{
+            let tr=document.createElement("tr");
+            tr.innerHTML=`<td>${u.username} (${u.role})</td>
+                          <td>${u.balance}$</td>
+                          <td>
+                              <button onclick="editBalance('${u.username}')">Edit</button>
+                              <button onclick="deleteUser('${u.username}')">Delete</button>
+                          </td>`;
+            tbody.appendChild(tr);
+        });
+        let hist=document.getElementById("adminHistoryList");
+        hist.innerHTML="";
+        users.forEach(u=>{
+            if(u.history){
+                let li=document.createElement("li");
+                li.innerText=u.username+": "+u.history.slice(-1)[0];
+                hist.appendChild(li);
+            }
+        });
+    }
+
+    function editBalance(username) {
+        let user=users.find(x=>x.username===username);
+        if (!user) return;
+        let val=prompt("New balance for "+username, user.balance);
+        if (val) {
+            user.balance=parseInt(val);
+            updateBalance();
+        }
+    }
+
+    function deleteUser(username) {
+        if (username==="admin") return alert("Cannot delete admin!");
+        users=users.filter(u=>u.username!==username);
+        saveUsers();
+        updateBalance();
+    }
+</script>
+</body>
+</html>
